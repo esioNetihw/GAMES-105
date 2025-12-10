@@ -1,0 +1,26 @@
+# Python 缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 编译生成的文件
+*.so
+.Python
+env/
+venv/
+conda_env/
+
+# 虚拟环境
+*.egg-info/
+.eggs/
+
+# 日志/配置
+*.log
+*.env
+config.ini
+
+# 系统/编辑器缓存
+.DS_Store
+.idea/
+.vscode/
+*.swp
