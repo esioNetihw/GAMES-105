@@ -362,7 +362,9 @@ def get_interpolate_pose(rot1, rot2, pos1, pos2, w):
     ret_pos = (1 - w) * pos1 + w * pos2
     return ret_rot, ret_pos
 
-# part4
+# part4 
+# 惯性插值文章
+# https://www.cnblogs.com/terrynoya/p/14711883.html
 def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
     '''
     将两个bvh动作平滑地连接起来，mix_time表示用于混合的帧数
@@ -375,10 +377,10 @@ def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
     # 下面这种直接拼肯定是不行的(
     #res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
     #res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
-
+    
     blendout_start_frame = mix_frame1
     blendout_end_frame = mix_frame1 + mix_time - 1
-    blendin_start_frame = 0
+    blendin_start_frame = 0#可以寻找最接近的一帧动作开始
     blendin_end_frame = mix_time - 1
 
     res = bvh_motion1.sub_sequence(0, blendout_start_frame - 1)
