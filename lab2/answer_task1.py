@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+import math
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 # ------------- lab1里的代码 -------------#
@@ -205,10 +206,23 @@ class BVHMotion():
         输入: rotation 形状为(4,)的ndarray, 四元数旋转
         输出: Ry, Rxz，分别为绕y轴的旋转和转轴在xz平面的旋转，并满足R = Ry * Rxz
         '''
+
         Ry = np.zeros_like(rotation)
         Rxz = np.zeros_like(rotation)
         # TODO: 你的代码
-        
+        mat_r = R.from_quat(rotation).as_matrix()
+        v = mat_r[:, 1]
+        y_axis = np.array([0, 1, 0])
+        ry_axis = mat_r[:, 1] / np.linalg.norm(mat_r[:, 1])
+        rat_axis = np.cross(ry_axis, y_axis)
+        theta = np.arccos(np.dot(ry_axis, y_axis))
+        if np.abs(theta) < 0.000001:
+            Ry = [0, 0, 1, 0]
+            Rxz = rotation
+        else:
+            Ry = (R.from_rotvec(theta * rat_axis) * R.from_quat(rotation))
+            Rxz = (Ry.inv() * R.from_quat(rotation)).as_quat()
+            Ry = Ry.as_quat()
         return Ry, Rxz
     
     # part 1
@@ -225,13 +239,31 @@ class BVHMotion():
             你需要完成并使用decompose_rotation_with_yaxis
             输入的target_facing_direction_xz的norm不一定是1
         '''
-        
         res = self.raw_copy() # 拷贝一份，不要修改原始数据
-        
         # 比如说，你可以这样调整第frame_num帧的根节点平移
         offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
         res.joint_position[:, 0, [0,2]] += offset
         # TODO: 你的代码
+        #normalize
+        target_facing_direction_xz = target_facing_direction_xz / np.linalg.norm(target_facing_direction_xz)
+        target_facing_direction_xz = np.array([target_facing_direction_xz[0], 0, target_facing_direction_xz[1]])
+        joint_rotation = R.from_quat(res.joint_rotation[frame_num, 0])
+        Ry, Rxz = self.decompose_rotation_with_yaxis(joint_rotation.as_quat())
+        source_facing_direction_xz = R.from_quat(Ry).apply(np.array([0, 0, 1]))
+        y_axis = np.cross(source_facing_direction_xz, target_facing_direction_xz)
+        if y_axis[1] > 0.:
+            y_axis = np.array([0.,1.,0.])
+        else:
+            y_axis = np.array([0.,-1.,0.])
+        theta = np.arccos(np.dot(source_facing_direction_xz, target_facing_direction_xz))
+        r = R.from_rotvec(theta * y_axis)#rotation souce to target
+        positoin0 = res.joint_position[frame_num, 0][0: 3]
+        for i in range(0, len(res.joint_rotation)):
+            rotation = res.joint_rotation[i, 0]
+            res.joint_rotation[i, 0] = (r * R.from_quat(rotation)).as_quat()
+            positioni = res.joint_position[i, 0][0: 3]
+            res.joint_position[i, 0][0: 3] = positoin0 + r.apply(positioni - positoin0)
+
         return res
 
 # part2
@@ -243,14 +275,46 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
     返回的动作应该有n3帧，第i帧由(1-alpha[i]) * bvh_motion1[j] + alpha[i] * bvh_motion2[k]得到
     i均匀地遍历0~n3-1的同时，j和k应该均匀地遍历0~n1-1和0~n2-1
     '''
-    
+    def lerp_position_and_rotation(pos1, r1, pos2, r2, t):
+        t = np.clip(t, 0, 1)
+        r = np.empty_like(r1)
+        for i in range(len(r1)):
+            slerp = Slerp([0, 1], R.from_quat([r1[i], r2[i]]))
+            r[i] = slerp([t]).as_quat()
+        pos = (1-t)*pos1+t*pos2
+        return pos, r
     res = bvh_motion1.raw_copy()
     res.joint_position = np.zeros((len(alpha), res.joint_position.shape[1], res.joint_position.shape[2]))
     res.joint_rotation = np.zeros((len(alpha), res.joint_rotation.shape[1], res.joint_rotation.shape[2]))
     res.joint_rotation[...,3] = 1.0
 
     # TODO: 你的代码
-    
+    n1 = len(bvh_motion1.joint_position)
+    n2 = len(bvh_motion2.joint_position)
+    n3 = len(alpha)
+
+    for frame_i in range(n3):
+        ratio = frame_i / (n3 - 1)
+
+        frame_j = ratio * (n1 - 1)
+        frame_j_a = math.floor(frame_j)
+        frame_j_b = min(frame_j_a + 1, n1 - 1)
+        positionj_a = bvh_motion1.joint_position[frame_j_a]
+        positionj_b = bvh_motion1.joint_position[frame_j_b]
+        rotationj_a = bvh_motion1.joint_rotation[frame_j_a]
+        rotationj_b = bvh_motion1.joint_rotation[frame_j_b]
+        positionj, rotationj = lerp_position_and_rotation(positionj_a, rotationj_a, positionj_b, rotationj_b, frame_j - frame_j_a)
+
+        frame_k = ratio * (n2 - 1)
+        frame_k_a = math.floor(frame_k)
+        frame_k_b = min(frame_k_a + 1, n2 - 1)
+        positionk_a = bvh_motion2.joint_position[frame_k_a]
+        positionk_b = bvh_motion2.joint_position[frame_k_b]
+        rotationk_a = bvh_motion2.joint_rotation[frame_k_a]
+        rotationk_b = bvh_motion2.joint_rotation[frame_k_b]
+        positionk, rotationk = lerp_position_and_rotation(positionk_a, rotationk_a, positionk_b, rotationk_b, frame_k - frame_k_a)
+
+        res.joint_position[frame_i], res.joint_rotation[frame_i] = lerp_position_and_rotation(positionj, rotationj, positionk, rotationk, alpha[frame_i])
     return res
 
 # part3
@@ -267,6 +331,37 @@ def build_loop_motion(bvh_motion):
     from smooth_utils import build_loop_motion
     return build_loop_motion(res)
 
+def nearest_frame(motion, target_pose):
+    def pose_distance(pose1, pose2):
+        total_dis = 0.
+        for i in range(1, pose1.shape[0]):
+            total_dis += np.linalg.norm(pose1[i] - pose2[i])
+        return total_dis
+
+    min_dis = float("inf")
+    ret = -1
+    for i in range(motion.motion_length):
+        dis = pose_distance(motion.joint_rotation[i], target_pose)
+        print(dis)
+        if dis < min_dis:
+            ret = i
+            min_dis = dis
+    return ret
+
+def get_interpolate_pose(rot1, rot2, pos1, pos2, w):
+    # 这个slerp的参数times到底是什么意思
+    ret_rot = np.empty_like(rot1)
+    for i in range(len(rot1)):
+        slerp = Slerp([0, 1], R.from_quat([rot1[i], rot2[i]]))
+        ret_rot[i] = slerp([w]).as_quat()
+
+    # 使用欧拉角直接线性插值，会产生鬼畜
+    # interpolate_euler = (1 - w) * R.from_quat(rot1).as_euler('XYZ') + w * R.from_quat(rot2).as_euler('XYZ')
+    # ret_rot = R.from_euler('XYZ', interpolate_euler).as_quat()
+
+    ret_pos = (1 - w) * pos1 + w * pos2
+    return ret_rot, ret_pos
+
 # part4
 def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
     '''
@@ -276,12 +371,34 @@ def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
     Tips:
         你可能需要用到BVHMotion.sub_sequence 和 BVHMotion.append
     '''
-    res = bvh_motion1.raw_copy()
-    
     # TODO: 你的代码
     # 下面这种直接拼肯定是不行的(
-    res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
-    res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
+    #res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
+    #res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
+
+    blendout_start_frame = mix_frame1
+    blendout_end_frame = mix_frame1 + mix_time - 1
+    blendin_start_frame = 0
+    blendin_end_frame = mix_time - 1
+
+    res = bvh_motion1.sub_sequence(0, blendout_start_frame - 1)
+    #将motion2改成循环动画
+    loop_motion = build_loop_motion(bvh_motion2)
+    last_translationxz = bvh_motion2.joint_position[-1, 0, [0, 2]]
+    last_position_facing_xz = R.from_quat(bvh_motion2.joint_rotation[-1, 0]).apply(np.array([0,0,1]))[[0,2]]
+    new_motion = loop_motion.translation_and_rotation(0, last_translationxz, last_position_facing_xz)
+    bvh_motion2.append(new_motion)
     
+    blendin_translationxz = bvh_motion1.joint_position[blendout_start_frame, 0, [0,2]]
+    blendin_Ry, _ = bvh_motion1.decompose_rotation_with_yaxis(bvh_motion1.joint_rotation[blendout_start_frame, 0, :])
+    blendin_facing_translationxz = R.from_quat(blendin_Ry).as_matrix()[2,[0,2]]
+    bvh_motion2 = bvh_motion2.translation_and_rotation(blendin_start_frame, blendin_translationxz, blendin_facing_translationxz)
+    #线性混合
+    bvh_blendout_motion = bvh_motion1.sub_sequence(blendout_start_frame, blendout_end_frame)
+    bvh_blendin_motion = bvh_motion2.sub_sequence(blendin_start_frame, blendin_end_frame)
+    bvh_blended_motion = blend_two_motions(bvh_blendout_motion, bvh_blendin_motion, np.linspace(0, 1, mix_time))
+    res.append(bvh_blended_motion)
+    res.append(bvh_motion2.sub_sequence(blendin_end_frame + 1, bvh_motion2.motion_length - 1))
     return res
+
 

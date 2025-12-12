@@ -11,7 +11,7 @@ def CCD_inverse_kinematics(meta_data, joint_positions, joint_orientations, targe
     orientation_chain[0] = R.from_quat(joint_orientations[path[0]]) if len(path2) == 0 else R.from_quat(joint_orientations[path[1]])
     #计算rotation
     rotation_chain = np.empty((len(path),), dtype=object)
-    rotation_chain[0] = R.from_quat([0, 0, 0, 1])
+    rotation_chain[0] = R.from_quat([1, 0, 0, 0])
     #计算offset
     offset_chain = np.empty((len(path), 3))
     offset_chain[0] = np.array([0.0, 0.0, 0.0])
@@ -22,7 +22,7 @@ def CCD_inverse_kinematics(meta_data, joint_positions, joint_orientations, targe
         position_chain[i] = joint_positions[index]
         offset_chain[i] = meta_data.joint_initial_position[path[i]] - meta_data.joint_initial_position[path[i - 1]]
         if meta_data.joint_parent[i] == -1:
-            joint_rotation = R.from_quat([0.,0.,0.,1]).as_quat()
+            joint_rotation = R.from_quat([1.,0.,0.,0]).as_quat()
         else:
             joint_rotation = (R.from_quat(joint_orientations[meta_data.joint_parent[i]]).inv() * R.from_quat(joint_orientations[i])).as_quat()
         if index in path2:
